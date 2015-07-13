@@ -1,0 +1,10 @@
+<launch>
+        <param name="robot_description" command="cat /home/bdavison/move_robot_ws/src/quad/model.xml" />
+        <node pkg="joy" type="joy_node" name="joy" >
+          <param name="dev" type="string" value="/dev/input/js0" />
+        </node>
+        <node name="robot_state_publisher" pkg="robot_state_publisher" type="state_publisher" />
+        <node name="move_box" pkg="quad" type="simulation.py" />
+        <node name="draw" pkg="quad" type="draw.py"/>
+</launch>
+
