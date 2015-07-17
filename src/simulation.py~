@@ -99,7 +99,6 @@ def callback(data):
   accel_pub.publish(acceleration)
   
   aVel.header.stamp = rospy.Time.now()
-  aVel.header.frame_id = '/chassis_r'
   aVel.wrench.torque.z = dX[5]
   aVel_pub.publish(aVel)
   
@@ -122,7 +121,7 @@ if __name__ == '__main__':
   joint_state  = JointState()
   velocity     = TwistStamped()
   acceleration = AccelStamped()
-  aVel         = WrenchStamped()
+  aVel = WrenchStamped()
   
   
   rate = rospy.Rate(60)

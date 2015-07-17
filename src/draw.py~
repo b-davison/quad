@@ -11,7 +11,7 @@ import numpy
 
 
 
-def draw_test():
+def draw_test(data):
 
 # intervals for points and waypoints
   dummy_int = 20
