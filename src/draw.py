@@ -5,18 +5,31 @@ from visualization_msgs.msg import Marker
 from geometry_msgs.msg import Point, TwistStamped, AccelStamped
 from rosgraph_msgs.msg import Log
 import roslib
-import math
 import numpy
+import json
+import os
+
+
+# Getting JSON data
+here = os.path.dirname(os.path.abspath(__file__))
+filename = os.path.join(here, 'setup draw.json')
+  
+with open(filename) as data_file:
+  j = json.load(data_file)
 
 
 
 
-def draw_test():
+####  draw_test draws a sine curve in the direction, amplitude, and frequency     
+####  given in the JSON file "setup draw.json" 
+    
+def draw_test(f):
 
 # intervals for points and waypoints
-  dummy_int = 20
+#  dummy_int = 20
   point_int = 10
 
+# Creating the marker objects
 
   points = Marker()
   line_strip = Marker()
@@ -63,33 +76,42 @@ def draw_test():
   text.color.r = 1.0
   text.color.a = 1.0
 
-#  text.text = 'hello world'
+
+  text.text = j["text"]
   text.pose.position.x = -1.0
   text.pose.position.y = -1.0 
   text.pose.position.z = -1.0
 
-  i = -50
+  i = 0
   id_count = 10
 
-
   # Create the vertices for the points and lines
-  while i < 50:
+  while i < 100:
 
-    x = i/10.0
-    z = (i/10.0) ** 2
+    x = i/10.0 - 5.0
+    z = j["amplitude"] * numpy.sin(f + i * j["frequency"]) 
     y = 0.0
 
+    if j["horizontal"]:
+      _ = x
+      x = z
+      z = _
+    
     p = Point()
     p.y = y
     p.x = x
     p.z = z
-    
-    if not i % dummy_int:
+# makes dummy boxes appear at intervals    
+#    if not i % dummy_int:
+
+
+# makes one dummy box appear on the line over box 
+    if i == 50:
       dummy = Marker()
       dummy.type = Marker.CUBE
       dummy.header.frame_id = "/world"
       dummy.header.stamp = rospy.Time.now()
-      dummy.id = id_count
+      dummy.id = 7
       dummy.ns = 'test'
       
       dummy.pose.position.x = x
@@ -111,9 +133,11 @@ def draw_test():
       dummy.color.b = 0.2
       dummy.color.a = 0.5
       
-      id_count += 1
+#      id_count += 1
       
       test_pub.publish(dummy)
+      
+# Adds a point at specified intervals
       
     if not i % point_int:
       points.points.append(p)
@@ -121,6 +145,7 @@ def draw_test():
     line_strip.points.append(p)
 
     i += 1
+   
 
 
   test_pub.publish(text)
@@ -131,7 +156,7 @@ def draw_test():
 
 
 
-
+#### makeVector asigns values to all the necessary members of the rviz Marker class
 def makeVector(end_point, start_point, color, i, frame):
 
   vector = Marker()
@@ -155,7 +180,7 @@ def makeVector(end_point, start_point, color, i, frame):
   vector.points.append(p1)
   
   p2 = Point()
-  p2.x, p2.y, p2.z = end_point[0], end_point[1], end_point[2]
+  p2.x, p2.y, p2.z = end_point
   
   vector.points.append(p2)
   
@@ -173,9 +198,9 @@ def vel_callback(data):
   index = 3
   frame = '/chassis_z'
   v = [data.twist.linear.x, data.twist.linear.y, data.twist.linear.z]
+  v = numpy.arctan(v)
       
   linear = makeVector(v, start, color, index, frame)
-
   l_vel_pub.publish(linear)
   
   
@@ -186,7 +211,8 @@ def vel_callback(data):
   index = 4
   frame = '/chassis_r'
   v = [data.twist.angular.z, 0.0, 1.0]
-      
+
+  
   angular = makeVector(v, start, color, index, frame)
   a_vel_pub.publish(angular)
   
@@ -203,6 +229,7 @@ def accel_callback(data):
   index = 5
   frame = '/chassis_z'
   v = [data.accel.linear.x, data.accel.linear.y, data.accel.linear.z]
+  v = numpy.arctan(v)
       
   linear = makeVector(v, start, color, index, frame)
   l_accel_pub.publish(linear)
@@ -225,7 +252,8 @@ def accel_callback(data):
 
 if __name__ == '__main__':
   rospy.init_node("draw")
-  r = rospy.Rate(60)
+  r = rospy.Rate(30)
+  f = 0.0  
   
 # Creating publishers for each vector as well as the test
   
@@ -235,12 +263,16 @@ if __name__ == '__main__':
   a_accel_pub = rospy.Publisher('ang_accel_vector', Marker, queue_size=10) 
   a_vel_pub   = rospy.Publisher('ang_vel_vector'  , Marker, queue_size=10)
   
-   
-#  rospy.Subscriber('velocity'    , TwistStamped, draw_test     )
+
+# Callbacks for vectors
   rospy.Subscriber('velocity'    , TwistStamped, vel_callback  )
   rospy.Subscriber('acceleration', AccelStamped, accel_callback)
+  
+  
+# Draws the test continuously
   while not rospy.is_shutdown():
-    draw_test()
-  r.sleep()
-  rospy.spin()
+    draw_test(f)
+    r.sleep()
+    f += 0.04
+
 
