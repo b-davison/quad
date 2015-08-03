@@ -1,9 +1,8 @@
 {
 
-  "text": "hello",
+  "text": "",
   "horizontal": true,
   "amplitude": 3.0,
-  "frequency": 0.25
-  
+  "frequency": 0.25 
   
 }

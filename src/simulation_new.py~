@@ -2,9 +2,8 @@
 
 import rospy
 import tf
-from sensor_msgs.msg import JointState, Joy
-#from sensor_msgs.msg import Joy
-from geometry_msgs.msg import TwistStamped, AccelStamped
+from sensor_msgs.msg import JointState
+from sensor_msgs.msg import Joy
 import numpy as np
 import pylab as plt
 
@@ -372,20 +371,6 @@ def callback(data,pars):
     joint_state.name = ['x', 'z', 'r']
     joint_state.position = [x, z, r]  
     joint_pub.publish(joint_state)
-    
-    
-    velocity.header.stamp = rospy.Time.now()
-    velocity.twist.linear.x  = dX[0]
-    velocity.twist.linear.z  = dX[1]
-    velocity.twist.angular.z = dX[2]
-    vel_pub.publish(velocity)
-
-    
-    acceleration.header.stamp = rospy.Time.now()
-    acceleration.accel.linear.x  = dX[3]
-    acceleration.accel.linear.z  = dX[4]
-    acceleration.accel.angular.z = dX[5]
-    accel_pub.publish(acceleration)
 
 
 def callbackjoy(data):
@@ -394,17 +379,9 @@ def callbackjoy(data):
 
 if __name__ == '__main__':
     rospy.init_node('quad_sim')
+    joint_pub = rospy.Publisher('joint_states', JointState, queue_size = 10)
+    joint_state = JointState()
     rate = rospy.Rate(60)
-    
-# Publisher objects    
-    joint_pub = rospy.Publisher('joint_states', JointState  , queue_size = 10)
-    vel_pub   = rospy.Publisher('velocity'    , TwistStamped, queue_size = 10)
-    accel_pub = rospy.Publisher('acceleration', AccelStamped, queue_size = 10)
-
-# State Objects
-    joint_state  = JointState()
-    velocity     = TwistStamped()
-    acceleration = AccelStamped()
   
     rospy.Subscriber("joy", Joy, callbackjoy)
     while not rospy.is_shutdown():

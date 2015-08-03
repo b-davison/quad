@@ -6,129 +6,407 @@ from sensor_msgs.msg import JointState
 from sensor_msgs.msg import Joy
 import numpy as np
 import pylab as plt
-from geometry_msgs.msg import TwistStamped, AccelStamped, PoseStamped, Point, Quaternion, WrenchStamped
 
-x  = 0
-z  = 0
-r  = 0
-dx = 0
-dz = 0
-dr = 0
+x=0
+z=0
+r=0
+dx=0
+dz=0
+dr=0
 data_ = None
 # parameters
-P = dict(g=9.8,b=.25,k=1.)
+### P = dict(g=9.8,b=.25,k=1.,tau=3./3.) # (original values)
+P = dict(g=9.8,b=(6.3*2.),k=(10.*4.)*3.,tau=3./3.) # (updated values)
 T = None
 
+# Joy stick indices
+_A_Button = 0
+_B_Button = 1
+_X_Button = 2
+_Y_Button = 3
+_prev_A = 0
+_prev_B = 0
+_prev_X = 0
+_prev_Y = 0
+
+_LS_Vert = 1
+_RS_Horiz = 3
+
+# Rotation Control Mode Variables
+_R_Pos = 0
+_R_Vel = 1
+r_mode = _R_Pos
+
+# Velocity (position) Control Mode
+_V_Vel = 1
+_V_Acc = 0
+v_mode = _V_Acc
+
+# Overall control mode
+_C_Norm = 0
+_C_Vert = 1
+_C_Horiz = 2
+c_mode = _C_Norm
+
 def f(time, state, pars):
-  # positions, velocities
-  x,z,r,dx,dz,dr = state
-  g = pars['g']
-  b = pars['b']
-  k = pars['k']
-  # accelerations
-  ddx = g *  np.sin(r) - b * dx - k * x
-  ddz = g * (np.cos(r) - 1.) - b * dz - k * z
-  ddr = 0. - b * dr - k * r
-  # return time derivative of state
-  dstate = [dx,dz,dr,ddx,ddz,ddr] 
-  return np.asarray(dstate)
+    # positions, velocities
+    x,z,r,dx,dz,dr = state
+    g = pars['g']
+    b = pars['b']
+    k = pars['k']
+    # accelerations (these account for a 1g thrust from the vehicle)
+    #ddx = g *  np.sin(r) - b * dx - k * x
+    #ddz = g * (np.cos(r) - 1.) - b * dz - k * z
+    #ddr = 0. - b * dr - k * r
+    ### ddx = g *  np.sin(r)
+    ### ddz = g * (np.cos(r) - 1.)
+    ### ddr = 0.
+
+    ### WARNING: DIVIDING BY COS(r)
+    # always apply thrust to cancel gravity
+    hold_thrust = g/np.cos(r)
+
+    ddx = np.sin(r) * hold_thrust
+    ddz = -g + np.cos(r) * hold_thrust
+    ddr = 0.
+    # return time derivative of state
+    dstate = [dx,dz,dr,ddx,ddz,ddr] 
+    return np.asarray(dstate)
+
+def f_z(time, state, pars):
+    # positions, velocities
+    x,z,r,dx,dz,dr = state
+    g = pars['g']
+    b = pars['b']
+    k = pars['k']
+
+    # drag term
+    ### tau = 5./3. # settling time is approx. 3*tau
+    tau = pars['tau']
+    d = 1/tau
+
+    # accelerations
+    ddx = 0. - d * dx
+    ddz = -g  - d * dz
+    ddr = 0.
+    # return time derivative of state
+    dstate = [dx,dz,dr,ddx,ddz,ddr] 
+    return np.asarray(dstate)
+
+def f_x(time, state, pars):
+    # positions, velocities
+    x,z,r,dx,dz,dr = state
+    g = pars['g']
+    b = pars['b']
+    k = pars['k']
+
+    # drag term
+    ### tau = 5./3. # settling time is approx. 3*tau
+    tau = pars['tau']
+    d = 1/tau
+
+    # critically damped when b^2 = 4*k
+    # time constant tc is 2/b, settling time is 3*tc
+    b = pars['b']
+    k = pars['k']
+    
+    ### WARNING: tan can be large for r close to pi/2 ###
+    # accelerations
+    ddx = g * np.tan(r) - d * dx
+    ddz = 0. - d * dz
+    ddr = 0. - b * dr - k * r
+    # return time derivative of state
+    dstate = [dx,dz,dr,ddx,ddz,ddr] 
+    return np.asarray(dstate)
 
 # vertical acceleration
 def g1(time, state, pars):
-  # positions, velocities
-  x,z,r,dx,dz,dr = state
-  # accelerations
-  ddx = np.sin(r)
-  ddz = np.cos(r)
-  ddr = 0.
-  # return time derivative of state
-  dstate = [0.,0.,0.,ddx,ddz,ddr] 
-  return np.asarray(dstate)
+    # positions, velocities
+    x,z,r,dx,dz,dr = state
+    # accelerations
+    ddx = np.sin(r)
+    ddz = np.cos(r)
+    ddr = 0.
+    # return time derivative of state
+    dstate = [0.,0.,0.,ddx,ddz,ddr] 
+    return np.asarray(dstate)
+
+# vertical acceleration (include drag)
+# command desired acceleration
+def g1_0(time, state, pars, inp):
+    # positions, velocities
+    x,z,r,dx,dz,dr = state
+
+    # drag term
+    ### tau = 5./3. # settling time is approx. 3*tau
+    tau = pars['tau']
+    d = 1/tau
+
+    # accelerations
+    ddx = np.sin(r)*inp[0] - d * dx
+    ddz = np.cos(r)*inp[0] - d * dz
+    ddr = 0.
+    # return time derivative of state
+    dstate = [0.,0.,0.,ddx,ddz,ddr] 
+    return np.asarray(dstate)
+
+def g1_0_z(time, state, pars):
+    # positions, velocities
+    x,z,r,dx,dz,dr = state
+
+    # accelerations
+    ddx = np.sin(r)
+    ddz = np.cos(r)
+    ddr = 0.
+    # return time derivative of state
+    dstate = [0.,0.,0.,ddx,ddz,ddr] 
+    return np.asarray(dstate)
+
+# vertical acceleration (include drag)
+# command desired velocity
+def g1_1(time, state, pars, inp):
+    # positions, velocities
+    x,z,r,dx,dz,dr = state
+
+    # drag term
+    ### tau = 5./3. # settling time is approx. 3*tau
+    tau = pars['tau']
+    d = 1/tau
+
+    # critically damped when b^2 = 4*k
+    # time constant tc is 2/b, settling time is 3*tc
+    b = pars['b']
+    k = pars['k']
+
+    #### WARNING, DIVIDING BY COSINE!!!
+    hold_thrust = ( -k*(dz-inp[0]) )/np.cos(r)
+
+    # accelerations
+    ddx = np.sin(r)*hold_thrust - d * dx 
+    ddz = np.cos(r)*hold_thrust - d * dz
+    ddr = 0.
+    # return time derivative of state
+    dstate = [0.,0.,0.,ddx,ddz,ddr] 
+    return np.asarray(dstate)
 
 # rotational acceleration
 def g2(time, state, pars):
-  # positions, velocities
-  x,z,r,dx,dz,dr = state
-  # accelerations
-  ddx = 0.
-  ddz = 0.
-  ddr = 1.
-  # return time derivative of state
-  dstate = [0.,0.,0.,ddx,ddz,ddr] 
-  return np.asarray(dstate)
+    # positions, velocities
+    x,z,r,dx,dz,dr = state
+    # accelerations
+    ddx = 0.
+    ddz = 0.
+    ddr = 1.
+    # return time derivative of state
+    dstate = [0.,0.,0.,ddx,ddz,ddr] 
+    return np.asarray(dstate)
 
-def callback(data):
-  global x,z,r,dx,dz,dr,P,T
-  if data is None:
-    U1 = 0
-    U2 = 0
-  else:
-    U1 = data.axes[1]
-    U2 = data.axes[3]
-  if T is None:
-    T = [rospy.Time.now().to_sec()]
-  
-  T.append(rospy.Time.now().to_sec())
-  dt = np.diff(T[-10:]).mean()
+# command desired rotational position
+# (essentially, change equilibrium of angular spring)
+def g2_0(time, state, pars, inp):
+    # positions, velocities
+    x,z,r,dx,dz,dr = state
+    ###b = pars['b']
+    ###k = pars['k']
 
-  X = [x,z,r,dx,dz,dr]
-  dX = (    f(T[-1], X, P) 
-            + g1(T[-1], X, P) * U1 
-            + g2(T[-1], X, P) * U2 )
+    # critically damped when b^2 = 4*k
+    # time constant tc is 2/b, settling time is 3*tc
+    b = pars['b']
+    k = pars['k']
+
+    # accelerations
+    ddx = 0.
+    ddz = 0.
+    ddr = 0. - b * dr - k * (r-inp[1])
+    # return time derivative of state
+    dstate = [0.,0.,0.,ddx,ddz,ddr] 
+    return np.asarray(dstate)
+
+def g2_0_x(time, state, pars):
+    # positions, velocities
+    x,z,r,dx,dz,dr = state
+    ###b = pars['b']
+    ###k = pars['k']
+
+    # critically damped when b^2 = 4*k
+    # time constant tc is 2/b, settling time is 3*tc
+    b = pars['b']
+    k = pars['k']
+
+    # accelerations
+    ddx = 0.
+    ddz = 0.
+    ddr = k
+    # return time derivative of state
+    dstate = [0.,0.,0.,ddx,ddz,ddr] 
+    return np.asarray(dstate)
+
+# command desired rotational rate
+# (essentially, change equilibrium of angular spring)
+def g2_1(time, state, pars, inp):
+    # positions, velocities
+    x,z,r,dx,dz,dr = state
+    ###b = pars['b']
+    ###k = pars['k']
+
+    # critically damped when b^2 = 4*k
+    # time constant tc is 2/b, settling time is 3*tc
+    b = pars['b']
+    k = pars['k']
+
+    # accelerations
+    ddx = 0.
+    ddz = 0.
+    ddr = 0. - b * (dr-inp[1])
+    # return time derivative of state
+    dstate = [0.,0.,0.,ddx,ddz,ddr] 
+    return np.asarray(dstate)
+
+def callback(data,pars):
+    global x,z,r,dx,dz,dr,P,T, r_mode, v_mode, c_mode, _prev_A, _prev_B, _prev_X, _prev_Y
+
+    g = pars['g']
+
+    if data is None:
+        U1 = 0
+        U2 = 0
+        U2_2 = 0
+    else:
+        # NOTE: Values from data.axes range from -1 to +1
+
+        # Allow up to 2g thrust output
+        U1 = 2. * g * data.axes[_LS_Vert]
+        # Use 0.35 instead of 0.5 to avoid tan(pi/2) in g2_0_x
+        U2 = np.pi * (0.35) * data.axes[_RS_Horiz]
+        if data.buttons[_A_Button] and not _prev_A:
+            # Reset the state
+            x = 0; dx = 0
+            z = 0; dz = 0
+            r = 0; dr = 0
+            rospy.loginfo("Reset!")
+        if data.buttons[_B_Button] and not _prev_B:
+            # cycle through rotation control modes
+            r_mode = (r_mode + 1) % 2
+            rospy.loginfo("r_mode = %d", r_mode)
+        if data.buttons[_X_Button] and not _prev_X:
+            # cycle through velocity control modes
+            v_mode = (v_mode + 1) % 2
+            rospy.loginfo("v_mode = %d", v_mode)
+        if data.buttons[_Y_Button] and not _prev_Y:
+            # cycle between full, vertical, and horizontal modes
+            c_mode = (c_mode + 1) % 3
+            if c_mode == _C_Norm:
+                rospy.loginfo("c_mode = NORMAL")
+            elif c_mode == _C_Vert:
+                rospy.loginfo("c_mode = VERTICAL")
+            elif c_mode == _C_Horiz:
+                rospy.loginfo("c_mode = HORIZONTAL")
+            else:
+                rospy.loginfo("c_mode = UNKNOWN")
+
+        # Check for held buttons
+        if data.buttons[_A_Button]:
+            _prev_A = 1
+        else:
+            _prev_A = 0
+        if data.buttons[_B_Button]:
+            _prev_B = 1
+        else:
+            _prev_B = 0
+        if data.buttons[_X_Button]:
+            _prev_X = 1
+        else:
+            _prev_X = 0
+        if data.buttons[_Y_Button]:
+            _prev_Y = 1
+        else:
+            _prev_Y = 0
             
-  X += dt * dX
-  x,z,r,dx,dz,dr = X
+    if T is None:
+        T=[rospy.Time.now().to_sec()]
   
-  joint_state.header.stamp = rospy.Time.now()
-  joint_state.name = ['x', 'z', 'r']
-  joint_state.position = [x, z, r]  
-  joint_pub.publish(joint_state)
+    T.append(rospy.Time.now().to_sec())
+    dt = np.diff(T[-10:]).mean()
   
-  
-  velocity.header.stamp = rospy.Time.now()
-  velocity.twist.linear.x  = dX[0]
-  velocity.twist.linear.z  = dX[1]
-  velocity.twist.angular.z = dX[2]
-  vel_pub.publish(velocity)
+    X = [x,z,r,dx,dz,dr]
 
+    # Select the appropriate method of control
+    if v_mode == _V_Acc:
+        g1m = g1_0
+    elif v_mode == _V_Vel:
+        g1m = g1_1
+    else:
+        g1m = g1
+    if r_mode == _R_Pos:
+        g2m = g2_0
+    elif r_mode == _R_Vel:
+        g2m = g2_1
+    else:
+        g2m = g2
+
+    if c_mode == _C_Norm:
+        dX = (    f(T[-1], X, P) 
+                  + g1m(T[-1], X, P, (U1,U2) )
+                  + g2m(T[-1], X, P, (U1,U2) ) )
+    elif c_mode == _C_Vert:
+        dX = (    f_z(T[-1], X, P) 
+                  + g1_0_z(T[-1], X, P) * U1
+                  + [0., 0., 0., 0., 0., 0.,] )
+    elif c_mode == _C_Horiz:
+        dX = (    f_x(T[-1], X, P) 
+                  + [0., 0., 0., 0., 0., 0.,]
+                  + g2_0_x(T[-1], X, P) * U2 )
+    else:
+        dX = (    f(T[-1], X, P) 
+                  + g1m(T[-1], X, P, (U1,U2) )
+                  + g2m(T[-1], X, P, (U1,U2) ) )
+
+    #X += dt * dX
+    # Trying to slow down the dynamics
+    X += dt * dX/1
+
+    x,z,r,dx,dz,dr = X
   
-  acceleration.header.stamp = rospy.Time.now()
-  acceleration.accel.linear.x  = dX[3]
-  acceleration.accel.linear.z  = dX[4]
-  acceleration.accel.angular.z = dX[5]
-  accel_pub.publish(acceleration)
-  
-  aVel.header.stamp = rospy.Time.now()
-  aVel.wrench.torque.z = dX[5]
-  aVel_pub.publish(aVel)
-  
-  
-  
+    joint_state.header.stamp = rospy.Time.now()
+    joint_state.name = ['x', 'z', 'r']
+    joint_state.position = [x, z, r]  
+    joint_pub.publish(joint_state)
+    
+    
+    velocity.header.stamp = rospy.Time.now()
+    velocity.twist.linear.x  = dX[0]
+    velocity.twist.linear.z  = dX[1]
+    velocity.twist.angular.z = dX[2]
+    vel_pub.publish(velocity)
+
+    
+    acceleration.header.stamp = rospy.Time.now()
+    acceleration.accel.linear.x  = dX[3]
+    acceleration.accel.linear.z  = dX[4]
+    acceleration.accel.angular.z = dX[5]
+    accel_pub.publish(acceleration)
+
+
 def callbackjoy(data):
-  global data_ 
-  data_ = data
-  
-if __name__ == '__main__':
-  rospy.init_node('move_box')
-  
-  
-  joint_pub = rospy.Publisher('joint_states', JointState  , queue_size = 10)
-  vel_pub   = rospy.Publisher('velocity'    , TwistStamped, queue_size = 10)
-  accel_pub = rospy.Publisher('acceleration', AccelStamped, queue_size = 10)
-  aVel_pub  = rospy.Publisher('angvel', WrenchStamped, queue_size = 10)
-  
-  
-  joint_state  = JointState()
-  velocity     = TwistStamped()
-  acceleration = AccelStamped()
-  aVel = WrenchStamped()
-  
-  
-  rate = rospy.Rate(60)
+    global data_ 
+    data_ = data
 
-  rospy.Subscriber("joy", Joy, callbackjoy)
+if __name__ == '__main__':
+    rospy.init_node('quad_sim')
+    rate = rospy.Rate(60)
+    
+# Publisher objects    
+    joint_pub = rospy.Publisher('joint_states', JointState  , queue_size = 10)
+    vel_pub   = rospy.Publisher('velocity'    , TwistStamped, queue_size = 10)
+    accel_pub = rospy.Publisher('acceleration', AccelStamped, queue_size = 10)
+
+# State Objects
+    joint_state  = JointState()
+    velocity     = TwistStamped()
+    acceleration = AccelStamped()
   
-  while not rospy.is_shutdown():
-    callback(data_)
-    rate.sleep()
+    rospy.Subscriber("joy", Joy, callbackjoy)
+    while not rospy.is_shutdown():
+        callback(data_, P)
+        rate.sleep()
 
